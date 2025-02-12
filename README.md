@@ -1,22 +1,25 @@
-# FastAPI RAG Chatbot
+# FastAPI Chatbot with Retrieval-Augmented Generation (RAG)
 
-## Overview
-This is a FastAPI-based chatbot that leverages Retrieval-Augmented Generation (RAG) to provide accurate responses. The system integrates ChromaDB for knowledge retrieval, Google Search API for additional context, and a Hugging Face transformer model for response generation.
+This project is a chatbot built using FastAPI, which integrates Retrieval-Augmented Generation (RAG) using ChromaDB, Google Search API, and Hugging Face transformers. The chatbot answers questions by retrieving relevant information from a set of documents and generating answers based on the retrieved content.
 
 ## Features
-- **FastAPI Framework**: Provides API endpoints for interaction.
-- **Jinja2 Templates**: Serves an HTML-based chat interface.
-- **ChromaDB**: Retrieves relevant knowledge from an embedded database.
-- **Google Search API** (Optional): Fetches additional context from the web.
-- **Hugging Face Transformers**: Generates responses using `google/flan-t5-large`.
 
-## Installation
-### Prerequisites
+- **Document Loading**: Load PDF documents from a directory (`./data`) for use in the RAG system.
+- **Text Splitting**: The documents are split into smaller chunks for easier processing and retrieval.
+- **ChromaDB Integration**: Store document chunks in ChromaDB for fast similarity search.
+- **Google Gemini API**: Generate answers based on the retrieved documents using the Gemini API.
+- **FastAPI Web Interface**: Provides a web interface to ask questions and get answers.
+
+## Requirements
+
 - Python 3.8+
-- `pip` package manager
+- FastAPI
+- Uvicorn
+- Langchain
+- Chroma
+- Google Generative AI
+- Langchain Ollama Embeddings
+- PyPDF2 (for loading PDFs)
+- dotenv (for environment variables)
 
-### Clone the Repository
-```sh
-git clone https://github.com/your-repo/fastapi-rag-chatbot.git
-cd fastapi-rag-chatbot
 
