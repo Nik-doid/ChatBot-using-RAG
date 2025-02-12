@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pydantic
+Jinja2
+chromadb
+sentence-transformers
+google-api-python-client
+transformers
+torch
