@@ -1,72 +1,89 @@
-from fastapi import FastAPI, HTTPException, Request, Form
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
-import chromadb
-from sentence_transformers import SentenceTransformer
-from googleapiclient.discovery import build
-from transformers import pipeline
 import os
-import uvicorn
+from langchain_community.document_loaders import PyPDFDirectoryLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain.schema.document import Document
+from langchain.chains import RetrievalQA
+from langchain_ollama import OllamaEmbeddings
+from langchain_chroma import Chroma
+from dotenv import load_dotenv
+import google.generativeai as genai 
+import time
+import google
 
-# Initialize FastAPI
-app = FastAPI()
+load_dotenv()
 
-# Initialize Jinja2Templates for serving HTML files
-templates = Jinja2Templates(directory="templates")
+# Load Google API Key from environment variables
+google_api_key = os.getenv("GOOGLE_API_KEY")
 
-# Load embedding model for retrieval
-embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+# Configure Gemini model
+genai.configure(api_key=google_api_key)
 
-# Initialize ChromaDB
-chroma_client = chromadb.Client()
-collection = chroma_client.get_or_create_collection(name="knowledge_base")
+# Function to load documents from PDF files
+def load_documents():
+    document_loader = PyPDFDirectoryLoader("./data")
+    return document_loader.load()
 
-# Load Google API credentials (optional)
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID")
-google_service = None
-if GOOGLE_API_KEY and GOOGLE_CSE_ID:
-    google_service = build("customsearch", "v1", developerKey=GOOGLE_API_KEY)
+# Function to split documents into chunks
+def split_documents(documents: list[Document]):
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=800,
+        chunk_overlap=80,
+        length_function=len,
+        is_separator_regex=False,
+    )
+    return text_splitter.split_documents(documents)
 
-# Load Hugging Face model for generation
-generator = pipeline("text2text-generation", model="google/flan-t5-large")
+# Function to get embedding function
+def get_embedding_function():
+    embeddings = OllamaEmbeddings(model="nomic-embed-text")
+    return embeddings
 
-# Pydantic model for JSON API requests
-class QueryRequest(BaseModel):
-    query: str
+# Function to add chunks to Chroma DB
+def add_to_chroma(chunks: list[Document]):
+    db = Chroma.from_documents(
+        documents=chunks,
+        embedding=get_embedding_function(),
+        persist_directory="./db"
+    )
 
-# Serve the HTML page
-@app.get("/", response_class=HTMLResponse)
-async def serve_form(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+# Function to embed query and retrieve documents from Chroma
+def retrieve_relevant_documents(query: str):
+    embedding_function = get_embedding_function()
+    db = Chroma(persist_directory="./db", embedding_function=embedding_function)
 
-# Handle POST requests from the HTML form
-@app.post("/chat")
-async def chat(query: str = Form(...)):
-    # Step 1: Retrieve relevant documents using ChromaDB
-    query_embedding = embedding_model.encode(query).tolist()
-    results = collection.query(query_embeddings=[query_embedding], n_results=5)
-    retrieved_docs = results.get("documents", [[]])[0] if results.get("documents") else []
+    print(f"Query being passed: {query}")  # Debugging step
+    relevant_docs = db.similarity_search(query, k=3)
+    
+    return relevant_docs
 
-    # Step 2: Use Google API for additional context (optional)
-    google_snippets = []
-    if GOOGLE_API_KEY and GOOGLE_CSE_ID:
-        try:
-            google_results = google_service.cse().list(q=query, cx=GOOGLE_CSE_ID).execute()
-            google_snippets = [item["snippet"] for item in google_results.get("items", [])]
-        except Exception as e:
-            google_snippets = [f"Google Search failed: {str(e)}"]
+# Function to generate an answer using Google Gemini API
+def generate_answer(retrieved_docs, query):
+    context = "\n".join([doc.page_content for doc in retrieved_docs])
+    
+    prompt = f"Answer the following question based on the provided context:\n\nContext:\n{context}\n\nQuestion: {query}\nAnswer:"
+    
+    model = genai.GenerativeModel("gemini-pro")
 
-    # Combine retrieved docs and Google snippets
-    context = " ".join(retrieved_docs + google_snippets)
+    try:
+        response = model.generate_content(prompt)
+        time.sleep(2)  # Delay of 2 seconds before the next request
+        return response.text
+    except google.api_core.exceptions.ResourceExhausted:
+        print("Resource exhausted. Please check your API quota.")
+        return "Error: API quota exceeded. Try again later."
 
-    # Step 3: Generate response using Hugging Face model (RAG)
-    prompt = f"Given the following context, answer the question accurately:\n\nContext: {context}\n\nQuestion: {query}\n\nAnswer:"
-    response = generator(prompt, max_length=150, temperature=0.7)
-    answer = response[0]["generated_text"].strip()
+# Main function to run the RAG system
+def run_rag_system(query):
+    retrieved_docs = retrieve_relevant_documents(query)
+    answer = generate_answer(retrieved_docs, query)
+    return answer
 
-    return {"response": answer}
+# Load, split, add to Chroma, and test the RAG system
+documents = load_documents()
+split_chunks = split_documents(documents)
+add_to_chroma(split_chunks)
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+# Example query
+query = "how to cook pizza"
+answer = run_rag_system(query)
+print(answer)
